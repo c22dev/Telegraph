@@ -26,18 +26,36 @@ public extension KeychainManager {
     var query = options
     query[kSecImportExportPassphrase] = passphrase as NSString
 
-    // Import the data
+    print("Attempting to import PKCS12 data with passphrase: \(passphrase)")
+
     var importResult: CFArray?
     let status = withUnsafeMutablePointer(to: &importResult) { SecPKCS12Import(data as NSData, query as CFDictionary, $0) }
-    guard status == errSecSuccess else { return nil }
 
-    // The result is an array of dictionaries, we are looking for the one that contains the identity
-    let importArray = importResult as? [[NSString: AnyObject]]
-    let importIdentity = importArray?.compactMap { dict in dict[kSecImportItemIdentity as NSString] }.first
+    print("SecPKCS12Import status: \(status)")
 
-    // Let's double check that we have a result and that it is a SecIdentity
-    guard let rawResult = importIdentity, CFGetTypeID(rawResult) == SecIdentityGetTypeID() else { return nil }
+    guard status == errSecSuccess else {
+      print("Error importing PKCS12 data: \(status)")
+      return nil
+    }
+
+    guard let importArray = importResult as? [[NSString: AnyObject]] else {
+      print("Failed to cast importResult to expected type")
+      return nil
+    }
+
+    print("Import result array: \(importArray)")
+
+    let importIdentity = importArray.compactMap { dict in
+      dict[kSecImportItemIdentity as NSString]
+    }.first
+
+    guard let rawResult = importIdentity, CFGetTypeID(rawResult) == SecIdentityGetTypeID() else {
+      print("No valid SecIdentity found in the import result")
+      return nil
+    }
+
     let result = rawResult as! SecIdentity
+    print("Successfully imported SecIdentity: \(result)")
 
     return result
   }
@@ -54,9 +72,19 @@ public extension KeychainManager {
     query[kSecAttrAccessible] = accessibility
     query[kSecValueRef] = value
 
+    print("Adding value to keychain with label: \(label)")
+
     var result: AnyObject?
     let status = withUnsafeMutablePointer(to: &result) { SecItemAdd(query as CFDictionary, $0) }
-    guard status == errSecSuccess else { throw KeychainError(code: status) }
+
+    print("SecItemAdd status: \(status)")
+
+    if status != errSecSuccess {
+      print("Error adding value to keychain: \(status)")
+      throw KeychainError(code: status)
+    } else {
+      print("Successfully added value to keychain")
+    }
   }
 
   /// Finds an item in the keychain.
@@ -66,12 +94,29 @@ public extension KeychainManager {
     query[kSecAttrLabel] = label as NSString
     query[kSecReturnRef] = kCFBooleanTrue
 
+    print("Finding item in keychain with label: \(label)")
+
     var result: AnyObject?
     let status = withUnsafeMutablePointer(to: &result) { SecItemCopyMatching(query as CFDictionary, $0) }
 
-    guard status == errSecSuccess || status == errSecItemNotFound else { throw KeychainError(code: status) }
-    guard let item = result else { throw KeychainError.itemNotFound }
-    guard let typedItem = item as? T else { throw KeychainError.invalidResult }
+    print("SecItemCopyMatching status: \(status)")
+
+    if status != errSecSuccess && status != errSecItemNotFound {
+      print("Error finding item in keychain: \(status)")
+      throw KeychainError(code: status)
+    }
+
+    guard let item = result else {
+      print("Item not found in keychain")
+      throw KeychainError.itemNotFound
+    }
+
+    guard let typedItem = item as? T else {
+      print("Found item but failed to cast to expected type")
+      throw KeychainError.invalidResult
+    }
+
+    print("Successfully found item in keychain: \(typedItem)")
 
     return typedItem
   }
@@ -82,7 +127,17 @@ public extension KeychainManager {
     query[kSecClass] = kClass
     query[kSecAttrLabel] = label as NSString
 
+    print("Removing item from keychain with label: \(label)")
+
     let status = SecItemDelete(query as CFDictionary)
-    guard status == errSecSuccess else { throw KeychainError(code: status) }
+
+    print("SecItemDelete status: \(status)")
+
+    if status != errSecSuccess {
+      print("Error removing item from keychain: \(status)")
+      throw KeychainError(code: status)
+    } else {
+      print("Successfully removed item from keychain")
+    }
   }
 }
